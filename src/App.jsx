@@ -1,10 +1,155 @@
-// 版本 2.1 (修正重複宣告的錯誤)
+// 版本 2.4 (新增 CSV 編碼自動偵測)
 import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
+import jschardet from 'jschardet'; // 引入新安裝的工具
+
+// App, StudentView, AmbassadorView 組件保持不變
+function App() { /* ... */ }
+function StudentView() { /* ... */ }
+function AmbassadorView() { /* ... */ }
+
+// --- 管理員視圖 (重點修改 handleUpload 函數) ---
+function AdminView() {
+    const [achievers, setAchievers] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [file, setFile] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const [uploadMessage, setUploadMessage] = useState('');
+    const [uploadError, setUploadError] = useState('');
+
+    useEffect(() => {
+        // ... (與之前版本相同)
+    }, []);
+
+    const handleFileChange = (event) => {
+        setUploadMessage('');
+        setUploadError('');
+        setFile(event.target.files[0]);
+    };
+    
+    // --- 👇 handleUpload 函數是本次升級的核心 ---
+    const handleUpload = () => {
+        if (!file) {
+            setUploadError('請先選擇一個 CSV 檔案');
+            return;
+        }
+        setUploading(true);
+        setUploadMessage('偵測檔案編碼並解析中...');
+        setUploadError('');
+
+        // 使用 FileReader 來讀取檔案的原始二進位內容
+        const reader = new FileReader();
+
+        reader.onload = function(event) {
+            try {
+                const buffer = event.target.result;
+                
+                // ✨ 1. 使用 jschardet 偵測編碼
+                const detected = jschardet.detect(new Uint8Array(buffer));
+                const encoding = detected.encoding;
+                console.log(`偵測到的檔案編碼: ${encoding}`);
+                setUploadMessage(`偵測到編碼為 ${encoding}，開始解析...`);
+
+                // ✨ 2. 將偵測到的編碼傳遞給 Papa.parse
+                Papa.parse(file, {
+                    encoding: encoding, // 使用偵測到的編碼
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: async (results) => {
+                        if (results.errors.length > 0) {
+                            const errorDetails = results.errors.map(e => `第 ${e.row} 行: ${e.message}`).join('; ');
+                            throw new Error(`檔案格式錯誤: ${errorDetails}`);
+                        }
+
+                        const students = results.data;
+                        if (!students || students.length === 0) {
+                            throw new Error("CSV 檔案中沒有找到有效的學生數據。");
+                        }
+                        
+                        const response = await fetch('/api/students/batch-import', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(students)
+                        });
+
+                        const data = await response.json();
+                        if (!response.ok) {
+                            throw new Error(data.detail || '上傳失敗，伺服器未提供詳細原因。');
+                        }
+                        setUploadMessage(data.message);
+                        
+                    },
+                    // 將所有錯誤統一在 catch 中處理
+                    error: (err) => { throw new Error(`PapaParse 錯誤: ${err.message}`) }
+                });
+
+            } catch (err) {
+                setUploadError(err.message);
+            } finally {
+                setUploading(false);
+                setFile(null);
+            }
+        };
+
+        reader.onerror = function() {
+            setUploadError('讀取檔案時發生錯誤。');
+            setUploading(false);
+        };
+        
+        // 以 ArrayBuffer 格式讀取檔案
+        reader.readAsArrayBuffer(file);
+    };
+
+    return (
+        <div>
+            <h2>管理員後台</h2>
+            <div style={{ padding: '1rem', border: '1px solid #ddd', borderRadius: '5px', marginBottom: '2rem' }}>
+                <h4>
+                    匯入學生名單
+                    <a href="/template.csv" download="students_template.csv" style={{fontSize: '14px', marginLeft: '1rem', fontWeight: 'normal'}}>
+                        (下載 CSV 範本)
+                    </a>
+                </h4>
+                <p>請選擇一個 CSV 檔案 (系統會自動嘗試偵測 UTF-8 或 Big5 編碼)。</p>
+                <input type="file" accept=".csv" onChange={handleFileChange} disabled={uploading} />
+                <button onClick={handleUpload} disabled={uploading || !file} style={{marginTop: '1rem'}}>
+                    {uploading ? '處理中...' : '上傳並匯入'}
+                </button>
+                {uploadMessage && <p style={{color: 'green'}}>{uploadMessage}</p>}
+                {uploadError && <p style={{color: 'red'}}>{uploadError}</p>}
+            </div>
+            
+            <h3>已達成獎勵資格名單</h3>
+            {loading ? <p>載入中...</p> : (
+                 <div className="achievers-list">
+                    <table>
+                        <thead>
+                            <tr><th>學號</th><th>姓名</th><th>班別</th><th>出席次數</th></tr>
+                        </thead>
+                        <tbody>
+                            {achievers.length > 0 ? achievers.map(s => (
+                                <tr key={s.id}>
+                                    <td>{s.id}</td>
+                                    <td>{s.name}</td>
+                                    <td>{s.cls}</td>
+                                    <td>{s.check_in_count}</td>
+                                </tr>
+                            )) : (
+                                <tr><td colSpan="4" style={{textAlign: 'center', padding: '1rem'}}>目前沒有學生達成資格</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+
+
+// --- 其他組件保持不變 ---
 
 function App() {
   const [role, setRole] = useState('學生');
-
   return (
     <div className="App">
       <h1>🏅 運動獎勵計劃</h1>
@@ -130,130 +275,6 @@ function AmbassadorView() {
                 <div className="result">
                     {result.success && <p style={{color: 'green'}}>{result.success}</p>}
                     {result.error && <p style={{color: 'red'}}>{result.error}</p>}
-                </div>
-            )}
-        </div>
-    );
-}
-
-function AdminView() {
-    const [achievers, setAchievers] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [file, setFile] = useState(null);
-    const [uploading, setUploading] = useState(false);
-    const [uploadMessage, setUploadMessage] = useState('');
-    const [uploadError, setUploadError] = useState('');
-
-    useEffect(() => {
-        const fetchAchievers = async () => {
-            setLoading(true);
-            try {
-                const response = await fetch('/api/achievers');
-                const data = await response.json();
-                setAchievers(data);
-            } catch (err) {
-                console.error("獲取列表失敗:", err);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchAchievers();
-    }, []);
-
-    const handleFileChange = (event) => {
-        setUploadMessage('');
-        setUploadError('');
-        setFile(event.target.files[0]);
-    };
-    
-    const handleUpload = () => {
-        if (!file) {
-            setUploadError('請先選擇一個 CSV 檔案');
-            return;
-        }
-        setUploading(true);
-        setUploadMessage('解析並上傳中...');
-        setUploadError('');
-
-        Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
-            complete: async (results) => {
-                if (results.errors.length > 0) {
-                    const errorDetails = results.errors.map(e => `第 ${e.row} 行: ${e.message}`).join('; ');
-                    setUploadError(`檔案格式錯誤: ${errorDetails}`);
-                    setUploading(false);
-                    return;
-                }
-
-                const students = results.data;
-                try {
-                    if (!students || students.length === 0) {
-                        throw new Error("CSV 檔案中沒有找到有效的學生數據。");
-                    }
-                    const response = await fetch('/api/students/batch-import', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(students)
-                    });
-                    const data = await response.json();
-                    if (!response.ok) {
-                        throw new Error(data.detail || '上傳失敗，伺服器未提供詳細原因。');
-                    }
-                    setUploadMessage(data.message);
-                } catch (err) {
-                    setUploadError(`上傳失敗: ${err.message}`);
-                } finally {
-                    setUploading(false);
-                    setFile(null);
-                }
-            },
-            error: (err) => {
-                setUploadError(`檔案解析失敗: ${err.message}`);
-                setUploading(false);
-            }
-        });
-    };
-
-    return (
-        <div>
-            <h2>管理員後台</h2>
-            <div style={{ padding: '1rem', border: '1px solid #ddd', borderRadius: '5px', marginBottom: '2rem' }}>
-                <h4>
-                    匯入學生名單
-                    <a href="/template.csv" download="students_template.csv" style={{fontSize: '14px', marginLeft: '1rem', fontWeight: 'normal'}}>
-                        (下載 CSV 範本)
-                    </a>
-                </h4>
-                <p>請選擇一個 CSV 檔案。檔案第一行需包含標題：`學號`, `姓名`, `班別`</p>
-                <input type="file" accept=".csv" onChange={handleFileChange} disabled={uploading} />
-                <button onClick={handleUpload} disabled={uploading || !file} style={{marginTop: '1rem'}}>
-                    {uploading ? '上傳中...' : '上傳並匯入'}
-                </button>
-                {uploadMessage && <p style={{color: 'green'}}>{uploadMessage}</p>}
-                {uploadError && <p style={{color: 'red'}}>{uploadError}</p>}
-            </div>
-            
-            <h3>已達成獎勵資格名單</h3>
-            {loading ? <p>載入中...</p> : (
-                <div className="achievers-list">
-                    <table>
-                        <thead>
-                            <tr><th>學號</th><th>姓名</th><th>班別</th><th>出席次數</th></tr>
-                        </thead>
-                        <tbody>
-                            {achievers.length > 0 ? achievers.map(s => (
-                                <tr key={s.id}>
-                                    <td>{s.id}</td>
-                                    <td>{s.name}</td>
-                                    <td>{s.cls}</td>
-                                    <td>{s.check_in_count}</td>
-                                </tr>
-                            )) : (
-                                <tr><td colSpan="4" style={{textAlign: 'center', padding: '1rem'}}>目前沒有學生達成資格</td></tr>
-                            )}
-                        </tbody>
-                    </table>
                 </div>
             )}
         </div>
