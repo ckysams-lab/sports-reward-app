@@ -28,6 +28,7 @@ body {
     border: 1px solid #ccc; 
     background: #fff; 
     border-radius: 5px; 
+    color: #000;
 }
 
 .role-selector button.active { 
