@@ -1,14 +1,126 @@
-// 版本 3.4 (穩定前端) - 替換 jschardet 為 chardet 並最終修復
+// 版本 4.0 (穩定前端) - 移除客戶端編碼偵測，簡化上傳邏輯
 import React, { useState, useEffect } from 'react';
-import Papa from 'papaparse';
-// **FIX: VERSION 3.4 - 替換為更可靠的 chardet 函式庫**
-import chardet from 'chardet';
-
-// (學生視圖組件 和 體育大使視圖組件 的程式碼保持不變，此處省略)
-// ...
 
 // =================================================================
-// 管理員視圖組件 (*** 主要修改區域 ***)
+// 學生視圖組件
+// =================================================================
+function StudentView() {
+  const [studentId, setStudentId] = useState('');
+  const [studentData, setStudentData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const handleSearch = async () => {
+    if (!studentId) {
+      setError('請輸入你的學號');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setMessage('');
+    setStudentData(null);
+    try {
+      const response = await fetch(`/api/students/${studentId}`);
+      if (!response.ok) throw new Error('找不到學生資料');
+      const data = await response.json();
+      setStudentData(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRedeem = async () => {
+     setLoading(true);
+     setError('');
+     setMessage('');
+     try {
+        const response = await fetch(`/api/students/${studentId}/redeem`, { method: 'POST' });
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.detail || '兌換失敗');
+        }
+        const data = await response.json();
+        setStudentData(data);
+        setMessage('兌換成功！');
+     } catch (err) {
+        setError(err.message);
+     } finally {
+        setLoading(false);
+     }
+  };
+
+  return (
+    <div>
+      <h2>學生查詢頁面</h2>
+      <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="請輸入你的學號" />
+      <button onClick={handleSearch} disabled={loading}>{loading ? '查詢中...' : '查詢'}</button>
+      {error && <p style={{color: 'red'}}>{error}</p>}
+      {message && <p style={{color: 'green'}}>{message}</p>}
+      {studentData && (
+        <div className="student-info">
+          <p>你好，<strong>{studentData.name} ({studentData.cls})</strong>！</p>
+          <p>你目前的出席記錄為: <strong>{studentData.check_in_count}</strong> 次。</p>
+          {studentData.check_in_count >= 10 ? (
+            <div>
+              <p style={{color: 'green'}}>恭喜！你可以兌換獎勵！</p>
+              <button onClick={handleRedeem} disabled={loading}>{loading ? '處理中...' : '點擊兌換'}</button>
+            </div>
+          ) : (
+            <p>再集齊 {10 - studentData.check_in_count} 次就可以兌換獎勵了！</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =================================================================
+// 體育大使視圖組件
+// =================================================================
+function AmbassadorView() {
+    const [studentId, setStudentId] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState(null);
+
+    const handleCheckIn = async () => {
+        if (!studentId) {
+            setResult({error: '請輸入學生學號'});
+            return;
+        }
+        setLoading(true);
+        setResult(null);
+        try {
+            const response = await fetch(`/api/students/${studentId}/check-in`, { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || '簽到失敗');
+            setResult({success: `簽到成功！ ${data.name} 已出席 ${data.check_in_count} 次。`});
+        } catch (err) {
+            setResult({error: err.message});
+        } finally {
+            setLoading(false);
+        }
+    };
+    
+    return (
+        <div>
+            <h2>體育大使簽到處</h2>
+            <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="請輸入要簽到的學生學號" />
+            <button onClick={handleCheckIn} disabled={loading}>{loading ? '簽到中...' : '確認簽到'}</button>
+            {result && (
+                <div className="result">
+                    {result.success && <p style={{color: 'green'}}>{result.success}</p>}
+                    {result.error && <p style={{color: 'red'}}>{result.error}</p>}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// =================================================================
+// 管理員視圖組件
 // =================================================================
 function AdminView() {
     const [achievers, setAchievers] = useState([]);
@@ -18,23 +130,25 @@ function AdminView() {
     const [uploadMessage, setUploadMessage] = useState('');
     const [uploadError, setUploadError] = useState('');
 
-    useEffect(() => {
-        const fetchAchievers = async () => {
-            setLoading(true);
-            try {
-                const response = await fetch('/api/achievers');
-                if (!response.ok) {
-                  throw new Error('無法獲取列表，後端伺服器出錯。');
-                }
-                const data = await response.json();
-                setAchievers(data);
-            } catch (err) {
-                console.error("獲取列表失敗:", err);
-                setUploadError(err.message);
-            } finally {
-                setLoading(false);
+    const fetchAchievers = async () => {
+        setLoading(true);
+        try {
+            const response = await fetch('/api/achievers');
+            if (!response.ok) {
+              const errData = await response.json();
+              throw new Error(errData.detail || '無法獲取列表，後端伺服器出錯。');
             }
-        };
+            const data = await response.json();
+            setAchievers(data);
+        } catch (err) {
+            console.error("獲取列表失敗:", err);
+            setUploadError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
         fetchAchievers();
     }, []);
 
@@ -44,90 +158,42 @@ function AdminView() {
         setFile(event.target.files[0]);
     };
 
-    const handleError = (errorSource, errorObject) => {
-        console.error(`[${errorSource}] 捕獲到錯誤:`, errorObject);
-        let errorMessage = "發生未知錯誤。";
-        if (errorObject instanceof Error) {
-            errorMessage = errorObject.message;
-        } else if (typeof errorObject === 'string') {
-            errorMessage = errorObject;
-        } else {
-            errorMessage = JSON.stringify(errorObject);
-        }
-        setUploadError(`[${errorSource}] ${errorMessage}`);
-    };
-
-    const handleUpload = () => {
+    const handleUpload = async () => {
         if (!file) {
             setUploadError('請先選擇一個 CSV 檔案');
             return;
         }
         setUploading(true);
-        setUploadMessage('偵測檔案編碼並解碼中...');
+        setUploadMessage('上傳檔案中...');
         setUploadError('');
 
-        const reader = new FileReader();
-        reader.onload = function(event) {
-            try {
-                const buffer = event.target.result;
-                const uint8array = new Uint8Array(buffer);
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
 
-                // **FIX: VERSION 3.4 - 使用 chardet.detect()**
-                // chardet 需要 Buffer，我們從 Uint8Array 創建它
-                const encoding = chardet.detect(Buffer.from(uint8array));
-                
-                if (!encoding) {
-                    throw new Error("無法偵測檔案編碼，請確保檔案為 UTF-8 或 Big5。");
-                }
-                
-                console.log(`偵測到的檔案編碼: ${encoding}`);
-                setUploadMessage(`偵測到編碼為 ${encoding}，開始解碼...`);
-                
-                const decoder = new TextDecoder(encoding);
-                const decodedString = decoder.decode(uint8array);
+            const response = await fetch('/api/students/batch-import-file', {
+                method: 'POST',
+                body: formData,
+            });
 
-                setUploadMessage('解碼完成，開始解析數據...');
-                
-                Papa.parse(decodedString, {
-                    header: true,
-                    skipEmptyLines: true,
-                    complete: async (results) => {
-                        try {
-                            if (results.errors.length > 0) {
-                                const errorDetails = results.errors.map(e => `第 ${e.row} 行: ${e.code} - ${e.message}`).join('; ');
-                                throw new Error(`檔案格式錯誤: ${errorDetails}`);
-                            }
-                            if (!results.data || results.data.length === 0) {
-                                throw new Error("CSV 檔案中沒有找到有效的學生數據。");
-                            }
-                            const response = await fetch('/api/students/batch-import', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(results.data)
-                            });
-                            const data = await response.json();
-                            if (!response.ok) {
-                                throw new Error(data.detail || '上傳失敗，伺服器未提供詳細原因。');
-                            }
-                            setUploadMessage(data.message);
-                        } catch (err) {
-                            handleError('CompleteCallback', err);
-                        }
-                    },
-                    error: (err) => { handleError('PapaParse', err); }
-                });
-            } catch (err) {
-                handleError('FileReader/Chardet', err);
-            } finally {
-                setUploading(false);
-                setFile(null);
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.detail || '上傳或處理失敗。');
             }
-        };
-        reader.onerror = function(err) {
-            handleError('FileReader', err);
+            setUploadMessage(data.message);
+            fetchAchievers(); // 成功上傳後刷新列表
+        } catch (err) {
+            console.error("上傳失敗:", err);
+            setUploadError(err.message);
+        } finally {
             setUploading(false);
-        };
-        reader.readAsArrayBuffer(file);
+            setFile(null);
+            // 清除 input 的值，以便可以再次上傳同一個檔案
+            if (document.querySelector('input[type="file"]')) {
+                document.querySelector('input[type="file"]').value = '';
+            }
+        }
     };
 
     return (
@@ -138,7 +204,7 @@ function AdminView() {
                     匯入學生名單
                     <a href="/template.csv" download="students_template.csv" style={{fontSize: '14px', marginLeft: '1rem', fontWeight: 'normal'}}> (下載 CSV 範本)</a>
                 </h4>
-                <p>請選擇一個 CSV 檔案 (系統會自動嘗試偵測 UTF-8 或 Big5 編碼)。</p>
+                <p>請選擇一個 CSV 檔案。**建議使用 Excel 另存為 "CSV UTF-8" 格式**。</p>
                 <input type="file" accept=".csv" onChange={handleFileChange} disabled={uploading} />
                 <button onClick={handleUpload} disabled={uploading || !file} style={{marginTop: '1rem'}}>{uploading ? '處理中...' : '上傳並匯入'}</button>
                 {uploadMessage && <p style={{color: 'green'}}>{uploadMessage}</p>}
@@ -171,7 +237,7 @@ function AdminView() {
 }
 
 // =================================================================
-// 主應用程式組件 (此處代碼未變更)
+// 主應用程式組件
 // =================================================================
 function App() {
   const [role, setRole] = useState('學生');
