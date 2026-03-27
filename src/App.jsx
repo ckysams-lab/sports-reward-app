@@ -1,10 +1,10 @@
-// 版本 3.1 (穩定前端) - 修正 PapaParse 錯誤處理
+// 版本 3.2 (穩定前端) - 全面加固錯誤處理
 import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
-import * as jschardet from 'jschardet';
+import *s jschardet from 'jschardet';
 
 // =================================================================
-// 學生視圖組件
+// 學生視圖組件 (此處代碼未變更)
 // =================================================================
 function StudentView() {
   const [studentId, setStudentId] = useState('');
@@ -80,7 +80,7 @@ function StudentView() {
 }
 
 // =================================================================
-// 體育大使視圖組件
+// 體育大使視圖組件 (此處代碼未變更)
 // =================================================================
 function AmbassadorView() {
     const [studentId, setStudentId] = useState('');
@@ -122,7 +122,7 @@ function AmbassadorView() {
 }
 
 // =================================================================
-// 管理員視圖組件
+// 管理員視圖組件 (*** 主要修改區域 ***)
 // =================================================================
 function AdminView() {
     const [achievers, setAchievers] = useState([]);
@@ -158,6 +158,20 @@ function AdminView() {
         setFile(event.target.files[0]);
     };
     
+    // **FIX: VERSION 3.2 - 統一錯誤處理邏輯**
+    const handleError = (errorSource, errorObject) => {
+        console.error(`[${errorSource}] 捕獲到錯誤:`, errorObject); // 增強日誌
+        let errorMessage = "發生未知錯誤。";
+        if (errorObject instanceof Error) {
+            errorMessage = errorObject.message;
+        } else if (typeof errorObject === 'string') {
+            errorMessage = errorObject;
+        } else {
+            errorMessage = JSON.stringify(errorObject); // 將未知物件轉換為字串
+        }
+        setUploadError(`[${errorSource}] ${errorMessage}`);
+    };
+
     const handleUpload = () => {
         if (!file) {
             setUploadError('請先選擇一個 CSV 檔案');
@@ -174,7 +188,7 @@ function AdminView() {
                 const uint8array = new Uint8Array(buffer);
                 
                 const detected = jschardet.detect(uint8array);
-                const encoding = (detected.encoding || 'utf-8').toLowerCase(); // Provide a fallback
+                const encoding = (detected && detected.encoding) ? detected.encoding.toLowerCase() : 'utf-8';
                 console.log(`偵測到的檔案編碼: ${encoding}`);
                 setUploadMessage(`偵測到編碼為 ${encoding}，開始解碼...`);
                 
@@ -187,38 +201,41 @@ function AdminView() {
                     header: true,
                     skipEmptyLines: true,
                     complete: async (results) => {
-                        // **FIX: VERSION 3.1**
-                        // Ensure error messages are strings before processing.
-                        if (results.errors.length > 0) {
-                            const errorDetails = results.errors.map(e => `第 ${e.row} 行: ${String(e.message)}`).join('; ');
-                            throw new Error(`檔案格式錯誤: ${errorDetails}`);
+                        try {
+                            if (results.errors.length > 0) {
+                                const errorDetails = results.errors.map(e => `第 ${e.row} 行: ${e.code} - ${e.message}`).join('; ');
+                                throw new Error(`檔案格式錯誤: ${errorDetails}`);
+                            }
+                            if (!results.data || results.data.length === 0) {
+                                throw new Error("CSV 檔案中沒有找到有效的學生數據。");
+                            }
+                            const response = await fetch('/api/students/batch-import', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(results.data)
+                            });
+                            const data = await response.json();
+                            if (!response.ok) {
+                                throw new Error(data.detail || '上傳失敗，伺服器未提供詳細原因。');
+                            }
+                            setUploadMessage(data.message);
+                        } catch (err) {
+                            handleError('CompleteCallback', err);
                         }
-                        const students = results.data;
-                        if (!students || students.length === 0) {
-                            throw new Error("CSV 檔案中沒有找到有效的學生數據。");
-                        }
-                        const response = await fetch('/api/students/batch-import', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(students)
-                        });
-                        const data = await response.json();
-                        if (!response.ok) {
-                            throw new Error(data.detail || '上傳失敗，伺服器未提供詳細原因。');
-                        }
-                        setUploadMessage(data.message);
                     },
-                    error: (err) => { throw new Error(`PapaParse 錯誤: ${String(err.message)}`) }
+                    error: (err) => {
+                        handleError('PapaParse', err);
+                    }
                 });
             } catch (err) {
-                setUploadError(String(err.message)); // Also ensure this is a string
+                handleError('FileReader', err);
             } finally {
                 setUploading(false);
                 setFile(null);
             }
         };
-        reader.onerror = function() {
-            setUploadError('讀取檔案時發生錯誤。');
+        reader.onerror = function(err) {
+            handleError('FileReader', err);
             setUploading(false);
         };
         reader.readAsArrayBuffer(file);
@@ -265,7 +282,7 @@ function AdminView() {
 }
 
 // =================================================================
-// 主應用程式組件
+// 主應用程式組件 (此處代碼未變更)
 // =================================================================
 function App() {
   const [role, setRole] = useState('學生');
