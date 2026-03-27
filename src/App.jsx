@@ -1,4 +1,4 @@
-// 版本 3.0 (穩定前端)
+// 版本 3.1 (穩定前端) - 修正 PapaParse 錯誤處理
 import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
 import * as jschardet from 'jschardet';
@@ -174,7 +174,7 @@ function AdminView() {
                 const uint8array = new Uint8Array(buffer);
                 
                 const detected = jschardet.detect(uint8array);
-                const encoding = detected.encoding.toLowerCase();
+                const encoding = (detected.encoding || 'utf-8').toLowerCase(); // Provide a fallback
                 console.log(`偵測到的檔案編碼: ${encoding}`);
                 setUploadMessage(`偵測到編碼為 ${encoding}，開始解碼...`);
                 
@@ -187,8 +187,10 @@ function AdminView() {
                     header: true,
                     skipEmptyLines: true,
                     complete: async (results) => {
+                        // **FIX: VERSION 3.1**
+                        // Ensure error messages are strings before processing.
                         if (results.errors.length > 0) {
-                            const errorDetails = results.errors.map(e => `第 ${e.row} 行: ${e.message}`).join('; ');
+                            const errorDetails = results.errors.map(e => `第 ${e.row} 行: ${String(e.message)}`).join('; ');
                             throw new Error(`檔案格式錯誤: ${errorDetails}`);
                         }
                         const students = results.data;
@@ -206,10 +208,10 @@ function AdminView() {
                         }
                         setUploadMessage(data.message);
                     },
-                    error: (err) => { throw new Error(`PapaParse 錯誤: ${err.message}`) }
+                    error: (err) => { throw new Error(`PapaParse 錯誤: ${String(err.message)}`) }
                 });
             } catch (err) {
-                setUploadError(err.message);
+                setUploadError(String(err.message)); // Also ensure this is a string
             } finally {
                 setUploading(false);
                 setFile(null);
