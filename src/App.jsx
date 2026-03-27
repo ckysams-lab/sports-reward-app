@@ -1,7 +1,8 @@
-// 版本 2.6 (修正 jschardet 的匯入方式)
+// 版本 2.7 (修正 CSV 解析時的內部類型錯誤)
 import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
-import * as jschardet from 'jschardet'; // ✨ 唯一的修改在這裡
+import jschardet from 'jschardet';
+import iconv from 'iconv-lite'; // 引入新安裝的解碼工具
 
 // =================================================================
 // 學生視圖組件 (Student View Component)
@@ -147,6 +148,7 @@ function AdminView() {
                 setAchievers(data);
             } catch (err) {
                 console.error("獲取列表失敗:", err);
+                // 你可以在這裡設置一個錯誤狀態來通知使用者
             } finally {
                 setLoading(false);
             }
@@ -166,20 +168,26 @@ function AdminView() {
             return;
         }
         setUploading(true);
-        setUploadMessage('偵測檔案編碼並解析中...');
+        setUploadMessage('偵測檔案編碼並解碼中...');
         setUploadError('');
 
         const reader = new FileReader();
+
         reader.onload = function(event) {
             try {
                 const buffer = event.target.result;
-                const detected = jschardet.detect(new Uint8Array(buffer));
-                const encoding = detected.encoding;
+                const uint8array = new Uint8Array(buffer);
+                
+                const detected = jschardet.detect(uint8array);
+                const encoding = detected.encoding.toLowerCase();
                 console.log(`偵測到的檔案編碼: ${encoding}`);
-                setUploadMessage(`偵測到編碼為 ${encoding}，開始解析...`);
+                setUploadMessage(`偵測到編碼為 ${encoding}，開始解碼...`);
+                
+                const decodedString = iconv.decode(Buffer.from(uint8array), encoding);
 
-                Papa.parse(file, {
-                    encoding: encoding,
+                setUploadMessage('解碼完成，開始解析數據...');
+                
+                Papa.parse(decodedString, {
                     header: true,
                     skipEmptyLines: true,
                     complete: async (results) => {
@@ -207,6 +215,7 @@ function AdminView() {
                     },
                     error: (err) => { throw new Error(`PapaParse 錯誤: ${err.message}`) }
                 });
+
             } catch (err) {
                 setUploadError(err.message);
             } finally {
@@ -214,10 +223,12 @@ function AdminView() {
                 setFile(null);
             }
         };
+
         reader.onerror = function() {
             setUploadError('讀取檔案時發生錯誤。');
             setUploading(false);
         };
+        
         reader.readAsArrayBuffer(file);
     };
 
