@@ -1,4 +1,4 @@
-# 版本 4.0 (穩定後端) - 增加檔案上傳接口，在後端處理解碼
+# 版本 4.1 (穩定後端) - 修正 get_achievers 中的 cursor 類型錯誤
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from upstash_redis import Redis
 from pydantic import BaseModel
@@ -25,7 +25,7 @@ class Student(BaseModel):
 # =================================================================
 @app.get("/api")
 def handle_root():
-    return {"message": "運動獎勵計劃 API - 版本 4.0"}
+    return {"message": "運動獎勵計劃 API - 版本 4.1"}
 
 @app.get("/api/students/{student_id}", response_model=Student)
 async def get_student(student_id: str):
@@ -54,12 +54,13 @@ async def redeem_reward(student_id: str):
     await redis.set(student_id, data)
     return data
 
+# **FIX: VERSION 4.1**
 @app.get("/api/achievers", response_model=list[Student])
 async def get_achievers():
     achievers = []
-    cursor = "0"
+    cursor = 0  # <--- 核心修正：將 cursor 初始值改為整數 0
     try:
-        while cursor != 0:
+        while True:
             cursor, keys = await redis.scan(cursor, match='[0-9]*')
             if keys:
                 for key in keys:
@@ -71,7 +72,9 @@ async def get_achievers():
                     except Exception as inner_error:
                         print(f"Skipping key '{key}' due to error. Data: {data}. Error: {inner_error}")
                         continue
-        # 根據 check_in_count 降序排序
+            if cursor == 0:
+                break # 當 cursor 再次變為 0 時，表示掃描完成
+                
         achievers.sort(key=lambda s: s.check_in_count, reverse=True)
         return achievers
     except Exception as e:
@@ -133,3 +136,4 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
         
     await pipe.execute()
     return {"message": f"成功匯入 {imported_count} 位學生資料。"}
+
