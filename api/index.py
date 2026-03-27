@@ -1,4 +1,4 @@
-# 版本 4.5 (穩定後端) - 終極方案：在 decode 時忽略錯誤，確保檔案一定能被讀取
+# 版本 4.6 (終極穩定版) - 徹底繞開 from_env()，手動建立 Redis 連接
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from upstash_redis import Redis
 from pydantic import BaseModel
@@ -9,20 +9,29 @@ import io
 import os
 
 # =================================================================
-# 診斷日誌與 Redis 初始化
+# >> 核心修正：手動讀取環境變數並建立 Redis 連接 <<
 # =================================================================
-print("--- [DIAGNOSTIC LOG] ---")
-upstash_url = os.getenv("UPSTASH_REDIS_REST_URL")
-upstash_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
-print(f"URL from env: {upstash_url}")
-print(f"Token from env: {'Exists' if upstash_token else 'NOT FOUND'}")
-print("--- [END DIAGNOSTIC LOG] ---")
+redis_url = os.getenv("UPSTASH_REDIS_REST_URL")
+redis_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
-try:
-    redis = Redis.from_env()
-except Exception as e:
-    print(f"CRITICAL: Failed to initialize Redis from env. Error: {e}")
-    redis = None
+# 增加日誌，確認讀取到的值
+print("--- [STARTUP LOG V4.6] ---")
+print(f"Found URL: {redis_url}")
+print(f"Found Token: {'Yes' if redis_token else 'No'}")
+
+redis = None
+if redis_url and redis_token:
+    try:
+        # 直接將 URL 和 Token 傳遞給 Redis()，不再使用 from_env()
+        redis = Redis(url=redis_url, token=redis_token)
+        print("Redis connection object created successfully.")
+    except Exception as e:
+        print(f"CRITICAL: Failed to initialize Redis with manual values. Error: {e}")
+else:
+    print("CRITICAL: Missing Redis URL or Token in environment variables.")
+
+print("--- [END STARTUP LOG V4.6] ---")
+
 
 app = FastAPI()
 
@@ -45,7 +54,7 @@ def check_redis():
 # =================================================================
 @app.get("/api")
 def handle_root():
-    return {"message": "運動獎勵計劃 API - 版本 4.5"}
+    return {"message": "運動獎勵計劃 API - 版本 4.6"}
 
 @app.get("/api/students/{student_id}", response_model=Student)
 async def get_student(student_id: str):
@@ -156,7 +165,6 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
     decoded_content = None
     for encoding in ['utf-8', 'big5', 'utf-8-sig']:
         try:
-            # 核心修正：增加 errors='replace'，確保解碼一定成功
             decoded_content = contents.decode(encoding, errors='replace')
             print(f"Successfully decoded file with encoding: {encoding}")
             break
