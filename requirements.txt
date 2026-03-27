@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+vercel-kv
+pandas
+python-dotenv
