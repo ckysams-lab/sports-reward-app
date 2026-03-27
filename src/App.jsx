@@ -1,4 +1,4 @@
-// 版本 1.8 (最終修正版)
+// 版本 1.9
 import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
 
@@ -204,7 +204,12 @@ function AdminView() {
         <div>
             <h2>管理員後台</h2>
             <div style={{ padding: '1rem', border: '1px solid #ddd', borderRadius: '5px', marginBottom: '2rem' }}>
-                <h4>匯入學生名單</h4>
+                <h4>
+                    匯入學生名單
+                    <a href="/template.csv" download="students_template.csv" style={{fontSize: '14px', marginLeft: '1rem', fontWeight: 'normal'}}>
+                        (下載 CSV 範本)
+                    </a>
+                </h4>
                 <p>請選擇一個 CSV 檔案。檔案第一行需包含標題：`學號`, `姓名`, `班別`</p>
                 <input type="file" accept=".csv" onChange={handleFileChange} disabled={uploading} />
                 <button onClick={handleUpload} disabled={uploading || !file} style={{marginTop: '1rem'}}>
