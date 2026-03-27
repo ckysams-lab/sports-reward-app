@@ -1,132 +1,11 @@
-// 版本 2.7 (修正 CSV 解析時的內部類型錯誤)
+// 版本 2.8 (使用瀏覽器內建的 TextDecoder，移除 iconv-lite)
 import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
 import jschardet from 'jschardet';
-import iconv from 'iconv-lite'; // 引入新安裝的解碼工具
+// 我們不再需要 import iconv from 'iconv-lite';
 
 // =================================================================
-// 學生視圖組件 (Student View Component)
-// =================================================================
-function StudentView() {
-  const [studentId, setStudentId] = useState('');
-  const [studentData, setStudentData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-
-  const handleSearch = async () => {
-    if (!studentId) {
-      setError('請輸入你的學號');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    setMessage('');
-    setStudentData(null);
-    try {
-      const response = await fetch(`/api/students/${studentId}`);
-      if (!response.ok) throw new Error('找不到學生資料');
-      const data = await response.json();
-      setStudentData(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRedeem = async () => {
-     setLoading(true);
-     setError('');
-     setMessage('');
-     try {
-        const response = await fetch(`/api/students/${studentId}/redeem`, { method: 'POST' });
-        if (!response.ok) {
-            const errData = await response.json();
-            throw new Error(errData.detail || '兌換失敗');
-        }
-        const data = await response.json();
-        setStudentData(data);
-        setMessage('兌換成功！');
-     } catch (err) {
-        setError(err.message);
-     } finally {
-        setLoading(false);
-     }
-  };
-
-  return (
-    <div>
-      <h2>學生查詢頁面</h2>
-      <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="請輸入你的學號" />
-      <button onClick={handleSearch} disabled={loading}>{loading ? '查詢中...' : '查詢'}</button>
-      
-      {error && <p style={{color: 'red'}}>{error}</p>}
-      {message && <p style={{color: 'green'}}>{message}</p>}
-
-      {studentData && (
-        <div className="student-info">
-          <p>你好，<strong>{studentData.name} ({studentData.cls})</strong>！</p>
-          <p>你目前的出席記錄為: <strong>{studentData.check_in_count}</strong> 次。</p>
-          {studentData.check_in_count >= 10 ? (
-            <div>
-              <p style={{color: 'green'}}>恭喜！你可以兌換獎勵！</p>
-              <button onClick={handleRedeem} disabled={loading}>{loading ? '處理中...' : '點擊兌換'}</button>
-            </div>
-          ) : (
-            <p>再集齊 {10 - studentData.check_in_count} 次就可以兌換獎勵了！</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// =================================================================
-// 體育大使視圖組件 (Ambassador View Component)
-// =================================================================
-function AmbassadorView() {
-    const [studentId, setStudentId] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [result, setResult] = useState(null);
-
-    const handleCheckIn = async () => {
-        if (!studentId) {
-            setResult({error: '請輸入學生學號'});
-            return;
-        }
-        setLoading(true);
-        setResult(null);
-        try {
-            const response = await fetch(`/api/students/${studentId}/check-in`, { method: 'POST' });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || '簽到失敗');
-            setResult({success: `簽到成功！ ${data.name} 已出席 ${data.check_in_count} 次。`});
-        } catch (err) {
-            setResult({error: err.message});
-        } finally {
-            setLoading(false);
-        }
-    };
-    
-    return (
-        <div>
-            <h2>體育大使簽到處</h2>
-            <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="請輸入要簽到的學生學號" />
-            <button onClick={handleCheckIn} disabled={loading}>{loading ? '簽到中...' : '確認簽到'}</button>
-
-            {result && (
-                <div className="result">
-                    {result.success && <p style={{color: 'green'}}>{result.success}</p>}
-                    {result.error && <p style={{color: 'red'}}>{result.error}</p>}
-                </div>
-            )}
-        </div>
-    );
-}
-
-// =================================================================
-// 管理員視圖組件 (Admin View Component)
+// 管理員視圖組件 (Admin View Component) - 最終修改
 // =================================================================
 function AdminView() {
     const [achievers, setAchievers] = useState([]);
@@ -148,7 +27,6 @@ function AdminView() {
                 setAchievers(data);
             } catch (err) {
                 console.error("獲取列表失敗:", err);
-                // 你可以在這裡設置一個錯誤狀態來通知使用者
             } finally {
                 setLoading(false);
             }
@@ -172,7 +50,6 @@ function AdminView() {
         setUploadError('');
 
         const reader = new FileReader();
-
         reader.onload = function(event) {
             try {
                 const buffer = event.target.result;
@@ -183,7 +60,9 @@ function AdminView() {
                 console.log(`偵測到的檔案編碼: ${encoding}`);
                 setUploadMessage(`偵測到編碼為 ${encoding}，開始解碼...`);
                 
-                const decodedString = iconv.decode(Buffer.from(uint8array), encoding);
+                // ✨ 核心修正：使用瀏覽器內建的 TextDecoder
+                const decoder = new TextDecoder(encoding);
+                const decodedString = decoder.decode(uint8array);
 
                 setUploadMessage('解碼完成，開始解析數據...');
                 
@@ -277,9 +156,123 @@ function AdminView() {
     );
 }
 
-// =================================================================
-// 主應用程式組件 (Main App Component)
-// =================================================================
+// --- 其他組件 ---
+
+function StudentView() {
+  const [studentId, setStudentId] = useState('');
+  const [studentData, setStudentData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const handleSearch = async () => {
+    if (!studentId) {
+      setError('請輸入你的學號');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setMessage('');
+    setStudentData(null);
+    try {
+      const response = await fetch(`/api/students/${studentId}`);
+      if (!response.ok) throw new Error('找不到學生資料');
+      const data = await response.json();
+      setStudentData(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRedeem = async () => {
+     setLoading(true);
+     setError('');
+     setMessage('');
+     try {
+        const response = await fetch(`/api/students/${studentId}/redeem`, { method: 'POST' });
+        if (!response.ok) {
+            const errData = await response.json();
+            throw new Error(errData.detail || '兌換失敗');
+        }
+        const data = await response.json();
+        setStudentData(data);
+        setMessage('兌換成功！');
+     } catch (err) {
+        setError(err.message);
+     } finally {
+        setLoading(false);
+     }
+  };
+
+  return (
+    <div>
+      <h2>學生查詢頁面</h2>
+      <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="請輸入你的學號" />
+      <button onClick={handleSearch} disabled={loading}>{loading ? '查詢中...' : '查詢'}</button>
+      
+      {error && <p style={{color: 'red'}}>{error}</p>}
+      {message && <p style={{color: 'green'}}>{message}</p>}
+
+      {studentData && (
+        <div className="student-info">
+          <p>你好，<strong>{studentData.name} ({studentData.cls})</strong>！</p>
+          <p>你目前的出席記錄為: <strong>{studentData.check_in_count}</strong> 次。</p>
+          {studentData.check_in_count >= 10 ? (
+            <div>
+              <p style={{color: 'green'}}>恭喜！你可以兌換獎勵！</p>
+              <button onClick={handleRedeem} disabled={loading}>{loading ? '處理中...' : '點擊兌換'}</button>
+            </div>
+          ) : (
+            <p>再集齊 {10 - studentData.check_in_count} 次就可以兌換獎勵了！</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AmbassadorView() {
+    const [studentId, setStudentId] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState(null);
+
+    const handleCheckIn = async () => {
+        if (!studentId) {
+            setResult({error: '請輸入學生學號'});
+            return;
+        }
+        setLoading(true);
+        setResult(null);
+        try {
+            const response = await fetch(`/api/students/${studentId}/check-in`, { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || '簽到失敗');
+            setResult({success: `簽到成功！ ${data.name} 已出席 ${data.check_in_count} 次。`});
+        } catch (err) {
+            setResult({error: err.message});
+        } finally {
+            setLoading(false);
+        }
+    };
+    
+    return (
+        <div>
+            <h2>體育大使簽到處</h2>
+            <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="請輸入要簽到的學生學號" />
+            <button onClick={handleCheckIn} disabled={loading}>{loading ? '簽到中...' : '確認簽到'}</button>
+
+            {result && (
+                <div className="result">
+                    {result.success && <p style={{color: 'green'}}>{result.success}</p>}
+                    {result.error && <p style={{color: 'red'}}>{result.error}</p>}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function App() {
   const [role, setRole] = useState('學生');
 
