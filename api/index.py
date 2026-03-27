@@ -1,4 +1,4 @@
-# 版本 4.9 (終極穩定版) - 恢復使用 errors='replace'，確保解碼的絕對成功
+# 版本 5.0 (終極穩定版) - 手動移除BOM，徹底解決欄位標題問題
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from upstash_redis import Redis
 from pydantic import BaseModel
@@ -44,7 +44,7 @@ def check_redis():
 # =================================================================
 @app.get("/api")
 def handle_root():
-    return {"message": "運動獎勵計劃 API - 版本 4.9"}
+    return {"message": "運動獎勵計劃 API - 版本 5.0"}
 
 @app.post("/api/students/batch-import-file")
 async def batch_import_students_from_file(file: UploadFile = File(...)):
@@ -55,22 +55,23 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
     contents = await file.read()
     
     decoded_content = None
-    # >> 核心修正：將 'utf-8-sig' 放在第一位，並恢復使用 'replace' 錯誤處理 <<
-    for encoding in ['utf-8-sig', 'utf-8', 'big5']:
+    for encoding in ['utf-8', 'utf-8-sig', 'big5']:
         try:
-            # 這是最寬容、最穩健的解碼方式
             decoded_content = contents.decode(encoding, errors='replace')
-            print(f"Successfully decoded file with encoding: {encoding}")
             break
-        except Exception:
+        except UnicodeDecodeError:
             continue
     
     if decoded_content is None:
-        # 這個錯誤理論上永遠不會再被觸發
-        raise HTTPException(status_code=500, detail="伺服器發生了未知的檔案讀取錯誤。")
+        raise HTTPException(status_code=400, detail="無法解碼檔案，請確保檔案為標準的 UTF-8 或 Big5 編碼。")
 
-    # 使用 csv 模組解析
-    reader = csv.DictReader(io.StringIO(decoded_content, newline=''))
+    # >> 核心修正：手動移除 BOM 字元 <<
+    BOM = '\ufeff'
+    if decoded_content.startswith(BOM):
+        decoded_content = decoded_content.lstrip(BOM)
+        print("BOM character found and removed.")
+
+    reader = csv.DictReader(io.StringIO(decoded_content))
     
     try:
         students = list(reader)
@@ -109,7 +110,7 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
     return {"message": f"成功匯入 {imported_count} 位學生資料。"}
 
 
-# (此後的其他接口，都與版本 4.8 保持一致，已確認無誤)
+# (此後的其他接口，都與版本 4.9 保持一致，已確認無誤)
 @app.get("/api/achievers", response_model=list[Student])
 async def get_achievers():
     check_redis()
