@@ -176,4 +176,67 @@ function AdminView() {
             header: true,
             skipEmptyLines: true,
             complete: async (results) => {
-                const students = results.
+                const students = results.data;
+                try {
+                    const response = await fetch('/api/students/batch-import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(students)
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || '上傳失敗');
+                    setUploadMessage(data.message);
+                } catch (err) {
+                    setUploadMessage(`上傳失敗: ${err.message}`);
+                } finally {
+                    setUploading(false);
+                    setFile(null);
+                }
+            },
+            error: (err) => {
+                setUploadMessage(`檔案解析失敗: ${err.message}`);
+                setUploading(false);
+            }
+        });
+    };
+
+    return (
+        <div>
+            <h2>管理員後台</h2>
+            <div style={{ padding: '1rem', border: '1px solid #ddd', borderRadius: '5px', marginBottom: '2rem' }}>
+                <h4>匯入學生名單</h4>
+                <p>請選擇一個 CSV 檔案。檔案第一行需包含標題：`學號`, `姓名`, `班別`</p>
+                <input type="file" accept=".csv" onChange={handleFileChange} disabled={uploading} />
+                <button onClick={handleUpload} disabled={uploading || !file} style={{marginTop: '1rem'}}>
+                    {uploading ? '上傳中...' : '上傳並匯入'}
+                </button>
+                {uploadMessage && <p>{uploadMessage}</p>}
+            </div>
+            
+            <h3>已達成獎勵資格名單</h3>
+            {loading ? <p>載入中...</p> : (
+                <div className="achievers-list">
+                    <table>
+                        <thead>
+                            <tr><th>學號</th><th>姓名</th><th>班別</th><th>出席次數</th></tr>
+                        </thead>
+                        <tbody>
+                            {achievers.length > 0 ? achievers.map(s => (
+                                <tr key={s.id}>
+                                    <td>{s.id}</td>
+                                    <td>{s.name}</td>
+                                    <td>{s.cls}</td>
+                                    <td>{s.check_in_count}</td>
+                                </tr>
+                            )) : (
+                                <tr><td colSpan="4" style={{textAlign: 'center', padding: '1rem'}}>目前沒有學生達成資格</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+
+export default App;
