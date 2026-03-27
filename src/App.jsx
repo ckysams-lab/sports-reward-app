@@ -1,7 +1,7 @@
-// 版本 2.5 (修正所有重複宣告的錯誤)
+// 版本 2.6 (修正 jschardet 的匯入方式)
 import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
-import jschardet from 'jschardet';
+import * as jschardet from 'jschardet'; // ✨ 唯一的修改在這裡
 
 // =================================================================
 // 學生視圖組件 (Student View Component)
@@ -147,7 +147,6 @@ function AdminView() {
                 setAchievers(data);
             } catch (err) {
                 console.error("獲取列表失敗:", err);
-                // 你可以在這裡設置一個錯誤狀態來通知使用者
             } finally {
                 setLoading(false);
             }
