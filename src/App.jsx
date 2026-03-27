@@ -1,7 +1,7 @@
-// 版本 3.2 (穩定前端) - 全面加固錯誤處理
+// 版本 3.3 (穩定前端) - 修正 vite 構建錯誤
 import React, { useState, useEffect } from 'react';
 import Papa from 'papaparse';
-import *s jschardet from 'jschardet';
+import * as jschardet from 'jschardet'; // <--- 修正此處的語法錯誤
 
 // =================================================================
 // 學生視圖組件 (此處代碼未變更)
@@ -122,7 +122,7 @@ function AmbassadorView() {
 }
 
 // =================================================================
-// 管理員視圖組件 (*** 主要修改區域 ***)
+// 管理員視圖組件 (此處代碼為版本 3.2，保持不變)
 // =================================================================
 function AdminView() {
     const [achievers, setAchievers] = useState([]);
@@ -158,16 +158,15 @@ function AdminView() {
         setFile(event.target.files[0]);
     };
     
-    // **FIX: VERSION 3.2 - 統一錯誤處理邏輯**
     const handleError = (errorSource, errorObject) => {
-        console.error(`[${errorSource}] 捕獲到錯誤:`, errorObject); // 增強日誌
+        console.error(`[${errorSource}] 捕獲到錯誤:`, errorObject);
         let errorMessage = "發生未知錯誤。";
         if (errorObject instanceof Error) {
             errorMessage = errorObject.message;
         } else if (typeof errorObject === 'string') {
             errorMessage = errorObject;
         } else {
-            errorMessage = JSON.stringify(errorObject); // 將未知物件轉換為字串
+            errorMessage = JSON.stringify(errorObject);
         }
         setUploadError(`[${errorSource}] ${errorMessage}`);
     };
