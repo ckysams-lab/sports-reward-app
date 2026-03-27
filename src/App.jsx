@@ -1,4 +1,4 @@
-// 版本 4.0 (穩定前端) - 移除客戶端編碼偵測，簡化上傳邏輯
+// 版本 6.0 (穩定前端) - 配合後端改動，改為前端篩選達標學生
 import React, { useState, useEffect } from 'react';
 
 // =================================================================
@@ -130,16 +130,23 @@ function AdminView() {
     const [uploadMessage, setUploadMessage] = useState('');
     const [uploadError, setUploadError] = useState('');
 
-    const fetchAchievers = async () => {
+    const fetchData = async () => {
         setLoading(true);
+        setUploadError(''); 
         try {
-            const response = await fetch('/api/achievers');
+            // 呼叫新的 API 接口
+            const response = await fetch('/api/all-students'); 
             if (!response.ok) {
               const errData = await response.json();
-              throw new Error(errData.detail || '無法獲取列表，後端伺服器出錯。');
+              throw new Error(errData.detail || '無法獲取學生列表，後端伺服器出錯。');
             }
-            const data = await response.json();
-            setAchievers(data);
+            const allStudents = await response.json();
+            
+            // 在前端進行篩選
+            const qualifiedStudents = allStudents.filter(student => student.check_in_count >= 10);
+            
+            setAchievers(qualifiedStudents);
+
         } catch (err) {
             console.error("獲取列表失敗:", err);
             setUploadError(err.message);
@@ -149,7 +156,7 @@ function AdminView() {
     };
 
     useEffect(() => {
-        fetchAchievers();
+        fetchData();
     }, []);
 
     const handleFileChange = (event) => {
@@ -182,14 +189,13 @@ function AdminView() {
                 throw new Error(data.detail || '上傳或處理失敗。');
             }
             setUploadMessage(data.message);
-            fetchAchievers(); // 成功上傳後刷新列表
+            fetchData(); // 成功上傳後，調用新的 fetchData 函式來刷新列表
         } catch (err) {
             console.error("上傳失敗:", err);
             setUploadError(err.message);
         } finally {
             setUploading(false);
             setFile(null);
-            // 清除 input 的值，以便可以再次上傳同一個檔案
             if (document.querySelector('input[type="file"]')) {
                 document.querySelector('input[type="file"]').value = '';
             }
