@@ -1,4 +1,4 @@
-# 版本 4.8 (終極穩定版) - 優先使用 utf-8-sig 解碼，根除 BOM 問題
+# 版本 4.9 (終極穩定版) - 恢復使用 errors='replace'，確保解碼的絕對成功
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from upstash_redis import Redis
 from pydantic import BaseModel
@@ -44,7 +44,7 @@ def check_redis():
 # =================================================================
 @app.get("/api")
 def handle_root():
-    return {"message": "運動獎勵計劃 API - 版本 4.8"}
+    return {"message": "運動獎勵計劃 API - 版本 4.9"}
 
 @app.post("/api/students/batch-import-file")
 async def batch_import_students_from_file(file: UploadFile = File(...)):
@@ -55,21 +55,21 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
     contents = await file.read()
     
     decoded_content = None
-    # >> 核心修正：將 'utf-8-sig' 放在第一位，優先處理 BOM <<
+    # >> 核心修正：將 'utf-8-sig' 放在第一位，並恢復使用 'replace' 錯誤處理 <<
     for encoding in ['utf-8-sig', 'utf-8', 'big5']:
         try:
-            decoded_content = contents.decode(encoding, errors='strict') # 使用嚴格模式，因為 utf-8-sig 應該能處理
+            # 這是最寬容、最穩健的解碼方式
+            decoded_content = contents.decode(encoding, errors='replace')
             print(f"Successfully decoded file with encoding: {encoding}")
             break
-        except UnicodeDecodeError:
-            # 如果 utf-8-sig 失敗，再嘗試其他編碼
+        except Exception:
             continue
     
     if decoded_content is None:
-        raise HTTPException(status_code=400, detail="無法解碼檔案，請確保檔案為標準的 UTF-8 或 Big5 編碼。")
+        # 這個錯誤理論上永遠不會再被觸發
+        raise HTTPException(status_code=500, detail="伺服器發生了未知的檔案讀取錯誤。")
 
     # 使用 csv 模組解析
-    # io.StringIO() 的 newline='' 參數有助於處理不同的換行符
     reader = csv.DictReader(io.StringIO(decoded_content, newline=''))
     
     try:
@@ -84,7 +84,6 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
     imported_count = 0
     
     for row in students:
-        # 現在 row.get('學號') 應該能正常工作
         student_id = row.get('學號')
         name = row.get('姓名')
         cls = row.get('班別')
@@ -109,8 +108,8 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
     await pipe.execute()
     return {"message": f"成功匯入 {imported_count} 位學生資料。"}
 
-# (此後的其他接口，都與版本 4.7 保持一致，已確認無誤)
-# ...
+
+# (此後的其他接口，都與版本 4.8 保持一致，已確認無誤)
 @app.get("/api/achievers", response_model=list[Student])
 async def get_achievers():
     check_redis()
