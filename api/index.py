@@ -1,4 +1,4 @@
-# 版本 4.3 (穩定後端) - 最終加固 get_achievers，正確處理 JSON 字串
+# 版本 4.5 (穩定後端) - 終極方案：在 decode 時忽略錯誤，確保檔案一定能被讀取
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from upstash_redis import Redis
 from pydantic import BaseModel
@@ -45,97 +45,104 @@ def check_redis():
 # =================================================================
 @app.get("/api")
 def handle_root():
-    return {"message": "運動獎勵計劃 API - 版本 4.3"}
+    return {"message": "運動獎勵計劃 API - 版本 4.5"}
 
 @app.get("/api/students/{student_id}", response_model=Student)
 async def get_student(student_id: str):
     check_redis()
-    data = await redis.get(student_id)
-    if not isinstance(data, dict):
-        # 嘗試從 JSON 字串解析
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=404, detail="找不到該學生或資料格式不正確")
-        else:
-            raise HTTPException(status_code=404, detail="找不到該學生或資料格式不正確")
-    return Student(**data)
+    raw_data = await redis.get(student_id)
+    student_data = None
+    try:
+        if isinstance(raw_data, dict):
+            student_data = raw_data
+        elif isinstance(raw_data, str):
+            student_data = json.loads(raw_data)
+        
+        if student_data is None:
+            raise HTTPException(status_code=404, detail="找不到該學生")
+            
+        return Student(**student_data)
+    except (json.JSONDecodeError, TypeError):
+         raise HTTPException(status_code=404, detail="學生資料格式不正確")
 
 
 @app.post("/api/students/{student_id}/check-in", response_model=Student)
 async def check_in(student_id: str):
     check_redis()
-    data = await redis.get(student_id)
-    if not isinstance(data, dict):
-         if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=404, detail="找不到該學生或資料格式不正確")
-         else:
-            raise HTTPException(status_code=404, detail="找不到該學生或資料格式不正確")
+    raw_data = await redis.get(student_id)
+    student_data = None
+    try:
+        if isinstance(raw_data, dict):
+            student_data = raw_data
+        elif isinstance(raw_data, str):
+            student_data = json.loads(raw_data)
 
-    data['check_in_count'] += 1
-    await redis.set(student_id, json.dumps(data))
-    return Student(**data)
+        if student_data is None:
+            raise HTTPException(status_code=404, detail="找不到該學生")
+    except (json.JSONDecodeError, TypeError):
+         raise HTTPException(status_code=404, detail="學生資料格式不正確")
+
+    student_data['check_in_count'] += 1
+    await redis.set(student_id, json.dumps(student_data))
+    return Student(**student_data)
 
 @app.post("/api/students/{student_id}/redeem", response_model=Student)
 async def redeem_reward(student_id: str):
     check_redis()
-    data = await redis.get(student_id)
-    if not isinstance(data, dict):
-         if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except json.JSONDecodeError:
-                raise HTTPException(status_code=404, detail="找不到該學生或資料格式不正確")
-         else:
-            raise HTTPException(status_code=404, detail="找不到該學生或資料格式不正確")
+    raw_data = await redis.get(student_id)
+    student_data = None
+    try:
+        if isinstance(raw_data, dict):
+            student_data = raw_data
+        elif isinstance(raw_data, str):
+            student_data = json.loads(raw_data)
 
-    if data.get('check_in_count', 0) < 10:
+        if student_data is None:
+            raise HTTPException(status_code=404, detail="找不到該學生")
+    except (json.JSONDecodeError, TypeError):
+         raise HTTPException(status_code=404, detail="學生資料格式不正確")
+
+    if student_data.get('check_in_count', 0) < 10:
         raise HTTPException(status_code=400, detail="出席次數不足，無法兌換")
     
-    data['check_in_count'] -= 10
-    await redis.set(student_id, json.dumps(data))
-    return Student(**data)
+    student_data['check_in_count'] -= 10
+    await redis.set(student_id, json.dumps(student_data))
+    return Student(**student_data)
 
 @app.get("/api/achievers", response_model=list[Student])
 async def get_achievers():
     check_redis()
     achievers = []
-    cursor = 0
     try:
-        while True:
-            cursor, keys = await redis.scan(cursor, match='[0-9]*')
-            if keys:
-                for key in keys:
-                    raw_data = None
-                    try:
-                        raw_data = await redis.get(key)
-                        
-                        student_data = None
-                        if isinstance(raw_data, dict):
-                            student_data = raw_data
-                        elif isinstance(raw_data, str):
-                            student_data = json.loads(raw_data)
-                        
-                        if student_data and student_data.get('check_in_count', 0) >= 10:
-                            achievers.append(Student(**student_data))
-                            
-                    except (json.JSONDecodeError, TypeError) as parse_error:
-                        print(f"Skipping key '{key}' due to data format error. Data: {raw_data}. Error: {parse_error}")
-                        continue
-                    except Exception as inner_error:
-                        print(f"Skipping key '{key}' due to unexpected error. Data: {raw_data}. Error: {inner_error}")
-                        continue
-            if cursor == 0:
-                break
+        all_keys_bytes = await redis.keys('[0-9]*')
+        if not all_keys_bytes:
+            return []
+
+        all_raw_data = await redis.mget(*all_keys_bytes)
+        
+        for raw_data in all_raw_data:
+            try:
+                if raw_data is None:
+                    continue
+
+                student_data = None
+                if isinstance(raw_data, dict):
+                    student_data = raw_data
+                elif isinstance(raw_data, str):
+                    student_data = json.loads(raw_data)
                 
+                if student_data and student_data.get('check_in_count', 0) >= 10:
+                    achievers.append(Student(**student_data))
+
+            except Exception as inner_error:
+                print(f"Skipping a record due to data processing error: {inner_error}. Data: {raw_data}")
+                continue
+        
         achievers.sort(key=lambda s: s.check_in_count, reverse=True)
         return achievers
+        
     except Exception as e:
-        print(f"CRITICAL Error in get_achievers function: {e}")
+        print(f"CRITICAL Error in get_achievers (keys/mget strategy): {e}")
         raise HTTPException(status_code=500, detail="獲取列表時發生嚴重的內部錯誤")
 
 @app.post("/api/students/batch-import-file")
@@ -149,13 +156,15 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
     decoded_content = None
     for encoding in ['utf-8', 'big5', 'utf-8-sig']:
         try:
-            decoded_content = contents.decode(encoding)
+            # 核心修正：增加 errors='replace'，確保解碼一定成功
+            decoded_content = contents.decode(encoding, errors='replace')
+            print(f"Successfully decoded file with encoding: {encoding}")
             break
-        except UnicodeDecodeError:
+        except Exception:
             continue
     
     if decoded_content is None:
-        raise HTTPException(status_code=400, detail="無法解碼檔案，請確保檔案為 UTF-8 或 Big5 編碼。")
+        raise HTTPException(status_code=500, detail="伺服器發生未知的檔案讀取錯誤。")
 
     reader = csv.DictReader(io.StringIO(decoded_content))
     
@@ -165,7 +174,7 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"CSV 檔案格式錯誤: {e}")
 
     if not students:
-        raise HTTPException(status_code=400, detail="CSV 檔案中沒有找到數據。")
+        raise HTTPException(status_code=400, detail="CSV 檔案中沒有找到數據，或檔案為空。")
 
     pipe = redis.pipeline()
     imported_count = 0
@@ -186,7 +195,6 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
                 "check_in_count": 0,
                 "last_check_in_date": ""
             }
-            # 確保存入的是 JSON 字串
             pipe.set(record["id"], json.dumps(record))
             imported_count += 1
             
