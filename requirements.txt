@@ -1,5 +1,3 @@
 fastapi
 upstash-redis
-uvicorn
-python-dotenv
 python-multipart
