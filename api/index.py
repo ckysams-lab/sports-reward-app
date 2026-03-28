@@ -25,20 +25,20 @@ if redis_url and redis_token:
 
 app = FastAPI()
 
+# >> 新增獎勵追蹤欄位 (給予預設值 0 防呆) <<
 class Student(BaseModel):
     id: str
     name: str
     cls: str
     check_in_count: int
     last_check_in_date: str
+    prizes_redeemed: int = 0  # 學生已在系統點擊兌換的次數
+    prizes_claimed: int = 0   # 老師實際已發放實體獎品的次數
 
 def check_redis():
     if redis is None:
         raise HTTPException(status_code=503, detail="後端資料庫連接初始化失敗。")
 
-# =================================================================
-# 智能解碼器 
-# =================================================================
 def smart_decode(contents: bytes) -> str:
     encodings = ['utf-8-sig', 'cp950', 'big5hkscs', 'big5', 'utf-8', 'gbk']
     for enc in encodings:
@@ -57,7 +57,7 @@ def smart_decode(contents: bytes) -> str:
 # =================================================================
 @app.get("/api")
 def handle_root():
-    return {"message": "運動獎勵計劃 API - 每日限簽一次升級版"}
+    return {"message": "運動獎勵計劃 API - 實體獎勵發放追蹤版"}
 
 @app.get("/api/all-students", response_model=list[Student])
 async def get_all_students():
@@ -83,6 +83,9 @@ async def get_all_students():
                     continue
             
             if student_data and isinstance(student_data, dict) and 'cls' in student_data:
+                # 確保舊資料也有新欄位
+                student_data['prizes_redeemed'] = student_data.get('prizes_redeemed', 0)
+                student_data['prizes_claimed'] = student_data.get('prizes_claimed', 0)
                 all_students.append(Student(**student_data))
                 
         return all_students
@@ -123,10 +126,7 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
         elif '班別' in header or 'class' in header.lower() or 'cls' in header.lower(): cls_idx = i
         
     if id_idx == -1 or name_idx == -1 or cls_idx == -1:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"找不到對應的欄位。必須包含'學號', '姓名', '班別'。\n後端實際讀取到的標題為: {headers}"
-        )
+        raise HTTPException(status_code=400, detail=f"找不到對應的欄位。必須包含'學號', '姓名', '班別'。\n後端實際讀取到的標題為: {headers}")
 
     pipe = redis.pipeline()
     imported_count = 0
@@ -151,14 +151,17 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
                 "name": name_str, 
                 "cls": cls_str, 
                 "check_in_count": 0, 
-                "last_check_in_date": ""
+                "last_check_in_date": "",
+                "prizes_redeemed": 0,
+                "prizes_claimed": 0
             }
+            # 如果使用匯入覆蓋，我們會把進度歸零。如果是更新，建議這裡先讀取舊資料。
+            # 為了簡化，這裡維持覆蓋寫入，若要保留舊資料，需先 mget 判斷。
             pipe.set(redis_key, json.dumps(record))
             imported_count += 1
             
     if imported_count == 0:
-        sample_data = rows[1] if len(rows) > 1 else "無"
-        raise HTTPException(status_code=400, detail=f"標題正確，但沒有匯入任何資料。第一行資料解析為: {sample_data}")
+        raise HTTPException(status_code=400, detail="標題正確，但沒有匯入任何資料。")
         
     try:
         await pipe.exec()
@@ -176,9 +179,10 @@ async def get_student(cls: str, student_id: str):
     if not raw_data:
         raise HTTPException(status_code=404, detail="找不到該學生，請確認班別與學號是否正確")
     student_data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+    student_data['prizes_redeemed'] = student_data.get('prizes_redeemed', 0)
+    student_data['prizes_claimed'] = student_data.get('prizes_claimed', 0)
     return Student(**student_data)
 
-# >> 核心修改區域：簽到邏輯 <<
 @app.post("/api/students/{cls}/{student_id}/check-in", response_model=Student)
 async def check_in(cls: str, student_id: str):
     check_redis()
@@ -190,15 +194,12 @@ async def check_in(cls: str, student_id: str):
         
     student_data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
     
-    # 1. 取得香港當前時間 (UTC+8)
     hk_timezone = timezone(timedelta(hours=8))
     today_str = datetime.now(hk_timezone).strftime("%Y-%m-%d")
     
-    # 2. 檢查今天是否已經簽到過
     if student_data.get('last_check_in_date') == today_str:
         raise HTTPException(status_code=400, detail="該學生今日已經簽到過了，不可重複記錄！")
         
-    # 3. 如果沒有簽到過，則增加次數並更新日期為今天
     student_data['check_in_count'] += 1
     student_data['last_check_in_date'] = today_str
     
@@ -218,5 +219,30 @@ async def redeem_reward(cls: str, student_id: str):
         raise HTTPException(status_code=400, detail="出席次數不足，無法兌換")
         
     student_data['check_in_count'] -= 10
+    # 增加已在系統兌換的次數
+    student_data['prizes_redeemed'] = student_data.get('prizes_redeemed', 0) + 1
+    
     await redis.set(redis_key, json.dumps(student_data))
     return Student(**student_data)
+
+# >> 全新 API：老師確認發放實體獎勵 <<
+@app.post("/api/students/{cls}/{student_id}/claim-prize", response_model=Student)
+async def claim_prize(cls: str, student_id: str):
+    check_redis()
+    redis_key = f"{cls.upper()}-{student_id}"
+    raw_data = await redis.get(redis_key)
+    if not raw_data:
+        raise HTTPException(status_code=404, detail="找不到該學生")
+    
+    student_data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+    redeemed = student_data.get('prizes_redeemed', 0)
+    claimed = student_data.get('prizes_claimed', 0)
+    
+    if claimed >= redeemed:
+        raise HTTPException(status_code=400, detail="該學生目前沒有待領取的獎勵。")
+        
+    # 增加已發放次數
+    student_data['prizes_claimed'] = claimed + 1
+    await redis.set(redis_key, json.dumps(student_data))
+    return Student(**student_data)
+
