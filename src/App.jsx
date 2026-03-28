@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 // =================================================================
-// 學生視圖組件 (保持不變)
+// 學生視圖組件
 // =================================================================
 function StudentView() {
   const [cls, setCls] = useState('');
@@ -55,13 +55,12 @@ function StudentView() {
      }
   };
 
-  // 結算印花邏輯
   const count = studentData?.check_in_count || 0;
-  const redeemable = Math.floor(count / 10); // 可兌換的獎勵份數
-  const needed = 10 - (count % 10);          // 距離下一個獎勵還差幾次
-  
-  // 計算要顯示的格子總數 (預設30格，若超過30則自動以10為單位擴充)
+  const redeemable = Math.floor(count / 10); 
+  const needed = 10 - (count % 10);          
   const totalSlots = Math.max(30, Math.ceil((count > 0 ? count : 1) / 10) * 10);
+  // 顯示待領獎數量 (已兌換 - 已領取)
+  const pendingPrizes = (studentData?.prizes_redeemed || 0) - (studentData?.prizes_claimed || 0);
 
   return (
     <div>
@@ -82,8 +81,13 @@ function StudentView() {
           <p style={{ fontSize: '18px', textAlign: 'center' }}>
             你好，<strong>{studentData.name} ({studentData.cls}班 {studentData.id}號)</strong>！
           </p>
+
+          {pendingPrizes > 0 && (
+             <div style={{ backgroundColor: '#ffecb3', padding: '10px', borderRadius: '8px', textAlign: 'center', marginBottom: '15px', border: '1px solid #ffc107', color: '#f57f17', fontWeight: 'bold'}}>
+               🎁 你目前有 {pendingPrizes} 份實體獎勵尚未領取，請找老師領獎喔！
+             </div>
+          )}
           
-          {/* ✨ 視覺化 30 格集印卡 UI ✨ */}
           <div style={{
               backgroundColor: '#fff9c4', 
               padding: '20px',
@@ -95,27 +99,19 @@ function StudentView() {
               <h3 style={{ margin: '0 0 15px 0', color: '#f57f17' }}>🏅 運動專屬集印卡 🏅</h3>
               
               <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px', marginBottom: '15px' }}>
-                  {/* 產生 30+ 個印花格子 */}
                   {[...Array(totalSlots)].map((_, index) => {
                       const isStamped = index < count;
-                      const isMilestone = (index + 1) % 10 === 0; // 第10, 20, 30格...
+                      const isMilestone = (index + 1) % 10 === 0;
                       return (
                           <div key={index} style={{
-                              width: '35px', 
-                              height: '35px', 
-                              borderRadius: '50%',
+                              width: '35px', height: '35px', borderRadius: '50%',
                               backgroundColor: isStamped ? '#ffca28' : '#ffffff',
                               border: isStamped ? '2px solid #ff9800' : (isMilestone ? '2px dashed #f57c00' : '2px dashed #bdbdbd'),
-                              display: 'flex', 
-                              alignItems: 'center', 
-                              justifyContent: 'center',
-                              fontSize: '18px', 
-                              transition: 'all 0.3s ease',
-                              boxShadow: isStamped ? '0 2px 4px rgba(0,0,0,0.2)' : 'none',
-                              position: 'relative'
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: '18px', transition: 'all 0.3s ease',
+                              boxShadow: isStamped ? '0 2px 4px rgba(0,0,0,0.2)' : 'none', position: 'relative'
                           }}>
                               {isStamped ? '⭐' : ''}
-                              {/* 沒蓋章的里程碑格子，顯示淡色的禮物圖示 */}
                               {!isStamped && isMilestone && <span style={{fontSize: '14px', position: 'absolute', opacity: 0.3}}>🎁</span>}
                           </div>
                       );
@@ -130,7 +126,6 @@ function StudentView() {
                   再集齊 <strong>{needed}</strong> 次就可以{redeemable > 0 ? '再' : ''}獲得一份獎勵了！加油！🏃‍♂️💨
               </p>
 
-              {/* 兌換邏輯：滿 10 個出現一次按鈕，按一次扣 10 個 */}
               {redeemable > 0 && (
                 <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#e8f5e9', borderRadius: '10px', border: '1px solid #81c784' }}>
                   <p style={{color: '#2e7d32', fontWeight: 'bold', fontSize: '16px', margin: '0 0 10px 0'}}>
@@ -199,10 +194,11 @@ function AmbassadorView() {
 }
 
 // =================================================================
-// 管理員視圖組件 (保持不變)
+// 管理員視圖組件 (✨ 加入待領獎名單及發放按鈕)
 // =================================================================
 function AdminView() {
     const [achievers, setAchievers] = useState([]);
+    const [prizeWaitlist, setPrizeWaitlist] = useState([]); // 新增待領獎名單
     const [loading, setLoading] = useState(true);
     const [file, setFile] = useState(null);
     const [uploading, setUploading] = useState(false);
@@ -214,19 +210,27 @@ function AdminView() {
         setUploadError(''); 
         try {
             const response = await fetch('/api/all-students'); 
-            if (!response.ok) {
-              const errData = await response.json();
-              throw new Error(errData.detail || '無法獲取學生列表，後端伺服器出錯。');
-            }
+            if (!response.ok) throw new Error('無法獲取學生列表，後端伺服器出錯。');
+            
             const allStudents = await response.json();
+            
+            // 篩選一：有資格兌換 (滿10次) 的學生
             const qualifiedStudents = allStudents.filter(student => student.check_in_count >= 10);
             qualifiedStudents.sort((a, b) => {
                 if (a.cls !== b.cls) return a.cls.localeCompare(b.cls);
                 return parseInt(a.id) - parseInt(b.id);
             });
             setAchievers(qualifiedStudents);
+
+            // 篩選二：已在系統兌換，但還沒領到實體獎勵的學生
+            const waitlist = allStudents.filter(student => (student.prizes_redeemed || 0) > (student.prizes_claimed || 0));
+            waitlist.sort((a, b) => {
+                if (a.cls !== b.cls) return a.cls.localeCompare(b.cls);
+                return parseInt(a.id) - parseInt(b.id);
+            });
+            setPrizeWaitlist(waitlist);
+
         } catch (err) {
-            console.error("獲取列表失敗:", err);
             setUploadError(err.message);
         } finally {
             setLoading(false);
@@ -260,13 +264,10 @@ function AdminView() {
                 body: formData,
             });
             const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.detail || '上傳或處理失敗。');
-            }
+            if (!response.ok) throw new Error(data.detail || '上傳或處理失敗。');
             setUploadMessage(data.message);
             fetchData(); 
         } catch (err) {
-            console.error("上傳失敗:", err);
             setUploadError(err.message);
         } finally {
             setUploading(false);
@@ -274,6 +275,22 @@ function AdminView() {
             if (document.querySelector('input[type="file"]')) {
                 document.querySelector('input[type="file"]').value = '';
             }
+        }
+    };
+
+    // 老師點擊「標記已發放」
+    const handleClaimPrize = async (cls, id) => {
+        try {
+            const response = await fetch(`/api/students/${cls}/${id}/claim-prize`, { method: 'POST' });
+            if (!response.ok) {
+                const errData = await response.json();
+                alert(`發放失敗: ${errData.detail}`);
+                return;
+            }
+            alert('✅ 標記成功！已記錄學生領取獎勵。');
+            fetchData(); // 重新整理列表
+        } catch (err) {
+            alert(`發生錯誤: ${err.message}`);
         }
     };
 
@@ -292,7 +309,47 @@ function AdminView() {
                 {uploadError && <p style={{color: 'red', fontWeight: 'bold', marginTop: '10px'}}>{uploadError}</p>}
             </div>
             
-            <h3>🏆 已達成獎勵資格名單 (10次以上)</h3>
+            {/* 新增：待發放獎勵名單 */}
+            <h3 style={{ color: '#d84315' }}>🎁 待發放實體獎勵名單</h3>
+            {loading ? <p>載入中...</p> : (
+                <div className="achievers-list" style={{ overflowX: 'auto', marginBottom: '2rem' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', border: '2px solid #ffcc80' }}>
+                        <thead>
+                            <tr style={{ backgroundColor: '#fff8e1', borderBottom: '2px solid #ffcc80' }}>
+                                <th style={{ padding: '10px' }}>班別</th>
+                                <th style={{ padding: '10px' }}>學號</th>
+                                <th style={{ padding: '10px' }}>姓名</th>
+                                <th style={{ padding: '10px', color: '#d84315' }}>待領數量</th>
+                                <th style={{ padding: '10px' }}>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {prizeWaitlist.length > 0 ? prizeWaitlist.map(s => {
+                                const pendingCount = (s.prizes_redeemed || 0) - (s.prizes_claimed || 0);
+                                return (
+                                <tr key={`wait-${s.cls}-${s.id}`} style={{ borderBottom: '1px solid #ffe082' }}>
+                                    <td style={{ padding: '10px' }}>{s.cls}</td>
+                                    <td style={{ padding: '10px' }}>{s.id}</td>
+                                    <td style={{ padding: '10px', fontWeight: 'bold' }}>{s.name}</td>
+                                    <td style={{ padding: '10px', color: 'red', fontWeight: 'bold' }}>{pendingCount} 份</td>
+                                    <td style={{ padding: '10px' }}>
+                                        <button 
+                                            onClick={() => handleClaimPrize(s.cls, s.id)}
+                                            style={{ backgroundColor: '#f57c00', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                                        >
+                                            發放 1 份
+                                        </button>
+                                    </td>
+                                </tr>
+                            )}) : (
+                                <tr><td colSpan="5" style={{textAlign: 'center', padding: '20px', color: '#777'}}>目前沒有學生等待領取實體獎勵</td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            <h3>🏆 已達成資格但尚未兌換名單 (滿 10 次)</h3>
             {loading ? <p>載入中...</p> : (
                 <div className="achievers-list" style={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -324,17 +381,14 @@ function AdminView() {
 }
 
 // =================================================================
-// 主應用程式組件 (🔐 加入密碼驗證邏輯)
+// 主應用程式組件 (密碼驗證邏輯)
 // =================================================================
 function App() {
-  // activeRole 表示目前實際成功進入的畫面，pendingRole 表示正在等待輸入密碼的身分
   const [activeRole, setActiveRole] = useState('學生');
   const [pendingRole, setPendingRole] = useState(null);
-  
   const [password, setPassword] = useState('');
   const [passError, setPassError] = useState('');
 
-  // 密碼設定庫
   const PASSWORDS = {
     '體育大使': '26754411',
     '管理員': 'Bck54321'
@@ -347,10 +401,8 @@ function App() {
       setPassword('');
       setPassError('');
     } else if (role === activeRole) {
-      // 如果已經在該身分，不需要重新輸入密碼
       setPendingRole(null);
     } else {
-      // 切換到需要密碼的身分，打開密碼輸入框
       setPendingRole(role);
       setPassword('');
       setPassError('');
@@ -358,9 +410,9 @@ function App() {
   };
 
   const handlePasswordSubmit = (e) => {
-    e.preventDefault(); // 防止表單重整畫面
+    e.preventDefault(); 
     if (password === PASSWORDS[pendingRole]) {
-      setActiveRole(pendingRole); // 密碼正確，切換畫面
+      setActiveRole(pendingRole); 
       setPendingRole(null);
       setPassword('');
       setPassError('');
@@ -375,7 +427,6 @@ function App() {
     setPassError('');
   };
 
-  // 判斷按鈕的顏色 (正在等待輸入密碼的按鈕也要亮起)
   const isRoleActive = (role) => {
       return pendingRole ? pendingRole === role : activeRole === role;
   };
@@ -403,7 +454,6 @@ function App() {
       </div>
       
       <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '15px', boxShadow: '0 8px 16px rgba(0,0,0,0.1)' }}>
-          {/* 如果正在等待輸入密碼，顯示密碼對話框 */}
           {pendingRole && (
               <div style={{ textAlign: 'center', padding: '20px' }}>
                   <h3 style={{ color: '#333' }}>🔒 請輸入 {pendingRole} 密碼</h3>
@@ -425,7 +475,6 @@ function App() {
               </div>
           )}
 
-          {/* 正常視圖顯示 (只有在沒有等待輸入密碼時才顯示) */}
           {!pendingRole && activeRole === '學生' && <StudentView />}
           {!pendingRole && activeRole === '體育大使' && <AmbassadorView />}
           {!pendingRole && activeRole === '管理員' && <AdminView />}
