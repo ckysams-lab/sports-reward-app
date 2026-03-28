@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 // =================================================================
-// 學生視圖組件 (✨ 30格超大集印卡升級版)
+// 學生視圖組件 (保持不變)
 // =================================================================
 function StudentView() {
   const [cls, setCls] = useState('');
@@ -324,10 +324,61 @@ function AdminView() {
 }
 
 // =================================================================
-// 主應用程式組件
+// 主應用程式組件 (🔐 加入密碼驗證邏輯)
 // =================================================================
 function App() {
-  const [role, setRole] = useState('學生');
+  // activeRole 表示目前實際成功進入的畫面，pendingRole 表示正在等待輸入密碼的身分
+  const [activeRole, setActiveRole] = useState('學生');
+  const [pendingRole, setPendingRole] = useState(null);
+  
+  const [password, setPassword] = useState('');
+  const [passError, setPassError] = useState('');
+
+  // 密碼設定庫
+  const PASSWORDS = {
+    '體育大使': '26754411',
+    '管理員': 'Bck54321'
+  };
+
+  const handleRoleClick = (role) => {
+    if (role === '學生') {
+      setActiveRole('學生');
+      setPendingRole(null);
+      setPassword('');
+      setPassError('');
+    } else if (role === activeRole) {
+      // 如果已經在該身分，不需要重新輸入密碼
+      setPendingRole(null);
+    } else {
+      // 切換到需要密碼的身分，打開密碼輸入框
+      setPendingRole(role);
+      setPassword('');
+      setPassError('');
+    }
+  };
+
+  const handlePasswordSubmit = (e) => {
+    e.preventDefault(); // 防止表單重整畫面
+    if (password === PASSWORDS[pendingRole]) {
+      setActiveRole(pendingRole); // 密碼正確，切換畫面
+      setPendingRole(null);
+      setPassword('');
+      setPassError('');
+    } else {
+      setPassError('❌ 密碼錯誤，請重新輸入');
+    }
+  };
+
+  const cancelLogin = () => {
+    setPendingRole(null);
+    setPassword('');
+    setPassError('');
+  };
+
+  // 判斷按鈕的顏色 (正在等待輸入密碼的按鈕也要亮起)
+  const isRoleActive = (role) => {
+      return pendingRole ? pendingRole === role : activeRole === role;
+  };
 
   return (
     <div className="App" style={{ maxWidth: '600px', margin: '0 auto', padding: '20px', fontFamily: '"Segoe UI", Tahoma, Geneva, Verdana, sans-serif' }}>
@@ -335,26 +386,49 @@ function App() {
       
       <div className="role-selector" style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '20px' }}>
         <button 
-            onClick={() => setRole('學生')} 
-            style={{ flex: 1, padding: '12px', backgroundColor: role === '學生' ? '#1976d2' : '#e3f2fd', color: role === '學生' ? 'white' : '#1565c0', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', transition: '0.2s' }}>
+            onClick={() => handleRoleClick('學生')} 
+            style={{ flex: 1, padding: '12px', backgroundColor: isRoleActive('學生') ? '#1976d2' : '#e3f2fd', color: isRoleActive('學生') ? 'white' : '#1565c0', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', transition: '0.2s' }}>
             🧑‍🎓 學生
         </button>
         <button 
-            onClick={() => setRole('體育大使')} 
-            style={{ flex: 1, padding: '12px', backgroundColor: role === '體育大使' ? '#f57c00' : '#fff3e0', color: role === '體育大使' ? 'white' : '#e65100', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', transition: '0.2s' }}>
+            onClick={() => handleRoleClick('體育大使')} 
+            style={{ flex: 1, padding: '12px', backgroundColor: isRoleActive('體育大使') ? '#f57c00' : '#fff3e0', color: isRoleActive('體育大使') ? 'white' : '#e65100', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', transition: '0.2s' }}>
             📝 體育大使
         </button>
         <button 
-            onClick={() => setRole('管理員')} 
-            style={{ flex: 1, padding: '12px', backgroundColor: role === '管理員' ? '#424242' : '#f5f5f5', color: role === '管理員' ? 'white' : '#424242', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', transition: '0.2s' }}>
+            onClick={() => handleRoleClick('管理員')} 
+            style={{ flex: 1, padding: '12px', backgroundColor: isRoleActive('管理員') ? '#424242' : '#f5f5f5', color: isRoleActive('管理員') ? 'white' : '#424242', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', transition: '0.2s' }}>
             ⚙️ 管理員
         </button>
       </div>
       
       <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '15px', boxShadow: '0 8px 16px rgba(0,0,0,0.1)' }}>
-          {role === '學生' && <StudentView />}
-          {role === '體育大使' && <AmbassadorView />}
-          {role === '管理員' && <AdminView />}
+          {/* 如果正在等待輸入密碼，顯示密碼對話框 */}
+          {pendingRole && (
+              <div style={{ textAlign: 'center', padding: '20px' }}>
+                  <h3 style={{ color: '#333' }}>🔒 請輸入 {pendingRole} 密碼</h3>
+                  <form onSubmit={handlePasswordSubmit}>
+                      <input 
+                          type="password" 
+                          value={password} 
+                          onChange={(e) => setPassword(e.target.value)} 
+                          placeholder="請輸入密碼"
+                          style={{ padding: '12px', fontSize: '16px', borderRadius: '5px', border: '1px solid #ccc', marginBottom: '15px', width: '80%', maxWidth: '250px', textAlign: 'center', letterSpacing: '2px' }}
+                          autoFocus
+                      />
+                      {passError && <p style={{ color: 'red', marginTop: '0', marginBottom: '15px', fontWeight: 'bold' }}>{passError}</p>}
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
+                          <button type="button" onClick={cancelLogin} style={{ padding: '10px 20px', backgroundColor: '#e0e0e0', color: '#333', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}>返回</button>
+                          <button type="submit" style={{ padding: '10px 20px', backgroundColor: '#0066cc', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' }}>登入</button>
+                      </div>
+                  </form>
+              </div>
+          )}
+
+          {/* 正常視圖顯示 (只有在沒有等待輸入密碼時才顯示) */}
+          {!pendingRole && activeRole === '學生' && <StudentView />}
+          {!pendingRole && activeRole === '體育大使' && <AmbassadorView />}
+          {!pendingRole && activeRole === '管理員' && <AdminView />}
       </div>
     </div>
   );
