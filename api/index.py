@@ -35,18 +35,19 @@ def check_redis():
     if redis is None:
         raise HTTPException(status_code=503, detail="後端資料庫連接初始化失敗。")
 
-# >> 核心破案神器：智能解碼器 <<
+# =================================================================
+# 智能解碼器 (解決 Big5 / UTF-8 及隱藏亂碼問題)
+# =================================================================
 def smart_decode(contents: bytes) -> str:
-    # 包含了港台常用的 cp950 和 big5hkscs
     encodings = ['utf-8-sig', 'cp950', 'big5hkscs', 'big5', 'utf-8', 'gbk']
     
-    # 策略 1: 尋找關鍵字 (無視雜訊，直接找指紋)
+    # 策略 1: 尋找關鍵字 (無視雜訊)
     for enc in encodings:
         text = contents.decode(enc, errors='replace')
         if '學號' in text or '姓名' in text or '班別' in text or 'id' in text.lower():
             return text
             
-    # 策略 2: 如果沒有關鍵字，嘗試嚴格解碼
+    # 策略 2: 嘗試嚴格解碼
     for enc in encodings:
         try:
             return contents.decode(enc)
@@ -55,7 +56,6 @@ def smart_decode(contents: bytes) -> str:
             
     # 最後的退路
     return contents.decode('utf-8-sig', errors='replace')
-
 
 # =================================================================
 # API Endpoints
@@ -169,7 +169,13 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
             detail=f"標題正確，但沒有匯入任何資料。第一行資料解析為: {sample_data}"
         )
         
-    await pipe.execute()
+    # >> 致命錯誤修復：Upstash Redis 的批量執行指令是 .exec() <<
+    try:
+        await pipe.exec()
+    except Exception as e:
+        print(f"Pipeline execution failed: {e}")
+        raise HTTPException(status_code=500, detail="儲存資料到資料庫時發生內部錯誤。")
+
     return {"message": f"成功匯入 {imported_count} 位學生資料。"}
 
 @app.get("/api/students/{student_id}", response_model=Student)
