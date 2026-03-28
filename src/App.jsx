@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 // =================================================================
-// 學生視圖組件 (✨ 加入全新視覺化集印卡)
+// 學生視圖組件 (✨ 30格超大集印卡升級版)
 // =================================================================
 function StudentView() {
   const [cls, setCls] = useState('');
@@ -47,13 +47,21 @@ function StudentView() {
         }
         const data = await response.json();
         setStudentData(data);
-        setMessage('🎉 兌換成功！你的印花已扣除 10 個，獎勵已發放！');
+        setMessage('🎉 兌換成功！已為你扣除 10 個印花，請向老師領取獎勵！');
      } catch (err) {
         setError(err.message);
      } finally {
         setLoading(false);
      }
   };
+
+  // 結算印花邏輯
+  const count = studentData?.check_in_count || 0;
+  const redeemable = Math.floor(count / 10); // 可兌換的獎勵份數
+  const needed = 10 - (count % 10);          // 距離下一個獎勵還差幾次
+  
+  // 計算要顯示的格子總數 (預設30格，若超過30則自動以10為單位擴充)
+  const totalSlots = Math.max(30, Math.ceil((count > 0 ? count : 1) / 10) * 10);
 
   return (
     <div>
@@ -75,9 +83,9 @@ function StudentView() {
             你好，<strong>{studentData.name} ({studentData.cls}班 {studentData.id}號)</strong>！
           </p>
           
-          {/* ✨ 視覺化集印卡 UI ✨ */}
+          {/* ✨ 視覺化 30 格集印卡 UI ✨ */}
           <div style={{
-              backgroundColor: '#fff9c4', // 暖色系卡片背景
+              backgroundColor: '#fff9c4', 
               padding: '20px',
               borderRadius: '15px',
               boxShadow: '0 6px 12px rgba(0,0,0,0.1)',
@@ -86,47 +94,52 @@ function StudentView() {
           }}>
               <h3 style={{ margin: '0 0 15px 0', color: '#f57f17' }}>🏅 運動專屬集印卡 🏅</h3>
               
-              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '12px', marginBottom: '15px' }}>
-                  {/* 產生 10 個印花格子 */}
-                  {[...Array(10)].map((_, index) => {
-                      // 判斷這個格子是否已經集到印花
-                      const isStamped = index < studentData.check_in_count;
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px', marginBottom: '15px' }}>
+                  {/* 產生 30+ 個印花格子 */}
+                  {[...Array(totalSlots)].map((_, index) => {
+                      const isStamped = index < count;
+                      const isMilestone = (index + 1) % 10 === 0; // 第10, 20, 30格...
                       return (
                           <div key={index} style={{
-                              width: '50px', 
-                              height: '50px', 
+                              width: '35px', 
+                              height: '35px', 
                               borderRadius: '50%',
                               backgroundColor: isStamped ? '#ffca28' : '#ffffff',
-                              border: isStamped ? '2px solid #ff9800' : '2px dashed #bdbdbd',
+                              border: isStamped ? '2px solid #ff9800' : (isMilestone ? '2px dashed #f57c00' : '2px dashed #bdbdbd'),
                               display: 'flex', 
                               alignItems: 'center', 
                               justifyContent: 'center',
-                              fontSize: '28px', 
+                              fontSize: '18px', 
                               transition: 'all 0.3s ease',
-                              boxShadow: isStamped ? '0 2px 5px rgba(0,0,0,0.2)' : 'none'
+                              boxShadow: isStamped ? '0 2px 4px rgba(0,0,0,0.2)' : 'none',
+                              position: 'relative'
                           }}>
                               {isStamped ? '⭐' : ''}
+                              {/* 沒蓋章的里程碑格子，顯示淡色的禮物圖示 */}
+                              {!isStamped && isMilestone && <span style={{fontSize: '14px', position: 'absolute', opacity: 0.3}}>🎁</span>}
                           </div>
                       );
                   })}
               </div>
               
               <p style={{ color: '#555', fontWeight: 'bold', margin: '10px 0' }}>
-                  目前共有：<span style={{ color: '#d84315', fontSize: '20px' }}>{studentData.check_in_count}</span> 個印花
+                  目前共有：<span style={{ color: '#d84315', fontSize: '22px' }}>{count}</span> 個印花
+              </p>
+              
+              <p style={{ color: '#795548', margin: '5px 0 15px 0', fontSize: '14px' }}>
+                  再集齊 <strong>{needed}</strong> 次就可以{redeemable > 0 ? '再' : ''}獲得一份獎勵了！加油！🏃‍♂️💨
               </p>
 
-              {/* 兌換邏輯 */}
-              {studentData.check_in_count >= 10 ? (
-                <div style={{ marginTop: '20px', padding: '10px', backgroundColor: '#e8f5e9', borderRadius: '10px', border: '1px solid #81c784' }}>
-                  <p style={{color: '#2e7d32', fontWeight: 'bold', fontSize: '18px', margin: '0 0 10px 0'}}>🎉 恭喜集滿 10 個印花！</p>
-                  <button onClick={handleRedeem} disabled={loading} style={{ padding: '12px 24px', backgroundColor: '#4caf50', color: 'white', border: 'none', borderRadius: '30px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', boxShadow: '0 4px 6px rgba(0,0,0,0.2)' }}>
-                      {loading ? '處理中...' : '🎁 點擊兌換獎勵'}
+              {/* 兌換邏輯：滿 10 個出現一次按鈕，按一次扣 10 個 */}
+              {redeemable > 0 && (
+                <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#e8f5e9', borderRadius: '10px', border: '1px solid #81c784' }}>
+                  <p style={{color: '#2e7d32', fontWeight: 'bold', fontSize: '16px', margin: '0 0 10px 0'}}>
+                    🎉 恭喜！你現在可以兌換 {redeemable} 份獎勵！
+                  </p>
+                  <button onClick={handleRedeem} disabled={loading} style={{ padding: '12px 20px', backgroundColor: '#4caf50', color: 'white', border: 'none', borderRadius: '30px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px', width: '100%', boxShadow: '0 4px 6px rgba(0,0,0,0.2)' }}>
+                      {loading ? '處理中...' : '🎁 點擊兌換 1 份獎勵 (扣除 10 個印花)'}
                   </button>
                 </div>
-              ) : (
-                <p style={{ color: '#795548', marginTop: '15px' }}>
-                  再集齊 <strong>{10 - studentData.check_in_count}</strong> 次就可以兌換獎勵了！加油！🏃‍♂️💨
-                </p>
               )}
           </div>
         </div>
