@@ -3,6 +3,7 @@ import json
 import csv
 import io
 import re
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import List
@@ -36,22 +37,19 @@ def check_redis():
         raise HTTPException(status_code=503, detail="後端資料庫連接初始化失敗。")
 
 # =================================================================
-# 智能解碼器 (解決 Big5 / UTF-8 及隱藏亂碼問題)
+# 智能解碼器 
 # =================================================================
 def smart_decode(contents: bytes) -> str:
     encodings = ['utf-8-sig', 'cp950', 'big5hkscs', 'big5', 'utf-8', 'gbk']
-    
     for enc in encodings:
         text = contents.decode(enc, errors='replace')
         if '學號' in text or '姓名' in text or '班別' in text or 'id' in text.lower():
             return text
-            
     for enc in encodings:
         try:
             return contents.decode(enc)
         except UnicodeDecodeError:
             continue
-            
     return contents.decode('utf-8-sig', errors='replace')
 
 # =================================================================
@@ -59,7 +57,7 @@ def smart_decode(contents: bytes) -> str:
 # =================================================================
 @app.get("/api")
 def handle_root():
-    return {"message": "運動獎勵計劃 API - 雙欄位搜尋升級版"}
+    return {"message": "運動獎勵計劃 API - 每日限簽一次升級版"}
 
 @app.get("/api/all-students", response_model=list[Student])
 async def get_all_students():
@@ -144,10 +142,9 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
         
         student_id_str = str(student_id).strip()
         name_str = str(name).strip()
-        cls_str = str(cls).strip().upper() # 確保班別轉大寫
+        cls_str = str(cls).strip().upper() 
         
         if student_id_str and name_str and cls_str:
-            # >> 核心修正：資料庫的鑰匙改為 "班別-學號" <<
             redis_key = f"{cls_str}-{student_id_str}"
             record = {
                 "id": student_id_str, 
@@ -161,10 +158,7 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
             
     if imported_count == 0:
         sample_data = rows[1] if len(rows) > 1 else "無"
-        raise HTTPException(
-            status_code=400, 
-            detail=f"標題正確，但沒有匯入任何資料。第一行資料解析為: {sample_data}"
-        )
+        raise HTTPException(status_code=400, detail=f"標題正確，但沒有匯入任何資料。第一行資料解析為: {sample_data}")
         
     try:
         await pipe.exec()
@@ -173,8 +167,6 @@ async def batch_import_students_from_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="儲存資料到資料庫時發生內部錯誤。")
 
     return {"message": f"成功匯入 {imported_count} 位學生資料。"}
-
-# >> 以下三個 API 路徑更新為接收 {cls} 和 {student_id} <<
 
 @app.get("/api/students/{cls}/{student_id}", response_model=Student)
 async def get_student(cls: str, student_id: str):
@@ -186,15 +178,30 @@ async def get_student(cls: str, student_id: str):
     student_data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
     return Student(**student_data)
 
+# >> 核心修改區域：簽到邏輯 <<
 @app.post("/api/students/{cls}/{student_id}/check-in", response_model=Student)
 async def check_in(cls: str, student_id: str):
     check_redis()
     redis_key = f"{cls.upper()}-{student_id}"
     raw_data = await redis.get(redis_key)
+    
     if not raw_data:
         raise HTTPException(status_code=404, detail="找不到該學生，請確認班別與學號是否正確")
+        
     student_data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+    
+    # 1. 取得香港當前時間 (UTC+8)
+    hk_timezone = timezone(timedelta(hours=8))
+    today_str = datetime.now(hk_timezone).strftime("%Y-%m-%d")
+    
+    # 2. 檢查今天是否已經簽到過
+    if student_data.get('last_check_in_date') == today_str:
+        raise HTTPException(status_code=400, detail="該學生今日已經簽到過了，不可重複記錄！")
+        
+    # 3. 如果沒有簽到過，則增加次數並更新日期為今天
     student_data['check_in_count'] += 1
+    student_data['last_check_in_date'] = today_str
+    
     await redis.set(redis_key, json.dumps(student_data))
     return Student(**student_data)
 
@@ -206,8 +213,10 @@ async def redeem_reward(cls: str, student_id: str):
     if not raw_data:
         raise HTTPException(status_code=404, detail="找不到該學生")
     student_data = json.loads(raw_data) if isinstance(raw_data, str) else raw_data
+    
     if student_data.get('check_in_count', 0) < 10:
         raise HTTPException(status_code=400, detail="出席次數不足，無法兌換")
+        
     student_data['check_in_count'] -= 10
     await redis.set(redis_key, json.dumps(student_data))
     return Student(**student_data)
